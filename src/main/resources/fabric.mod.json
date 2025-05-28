@@ -1,11 +1,11 @@
 {
 	"schemaVersion": 1,
-	"id": "template",
+	"id": "simplemobswitch",
 	"version": "${version}",
-	"name": "Template",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"name": "Simple Mob Switch",
+	"description": "敵対モブの自然湧きを間接的に停止・再開する制御機能を提供するMOD",
 	"authors": [
-		"Me!"
+		"IzmYuta"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",
@@ -16,18 +16,11 @@
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"com.example.Template"
-		],
-		"client": [
-			"com.example.TemplateClient"
+			"com.simplemobswitch.SimpleMobSwitch"
 		]
 	},
 	"mixins": [
-		"template.mixins.json",
-		{
-			"config": "template.client.mixins.json",
-			"environment": "client"
-		}
+		"simplemobswitch.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.16.12",

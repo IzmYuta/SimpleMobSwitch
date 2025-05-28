@@ -1,0 +1,206 @@
+package com.simplemobswitch;
+
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.context.CommandContext;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.mob.ZombieEntity;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.command.CommandManager;
+import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import net.minecraft.entity.SpawnReason;
+import java.util.function.Consumer;
+
+import java.util.UUID;
+
+public class SimpleMobSwitch implements ModInitializer {
+	public static final String MOD_ID = "simplemobswitch";
+
+	// This logger is used to write text to the console and the log file.
+	// It is considered best practice to use your mod id as the logger's name.
+	// That way, it's clear which mod wrote info, warnings, and errors.
+	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+
+	private static final String DUMMY_MOB_NAME = "MobSwitchDummy";
+	private static final int DUMMY_MOB_COUNT = 70; // モブ制限数
+	private static final int DUMMY_MOB_Y_LEVEL = 500; // 配置する高さ
+
+	@Override
+	public void onInitialize() {
+		// This code runs as soon as Minecraft is in a mod-load-ready state.
+		// However, some things (like resources) may still be uninitialized.
+		// Proceed with mild caution.
+
+		LOGGER.info("SimpleMobSwitch initializing...");
+
+		// コマンド登録（非推奨APIを新しいものに置き換え）
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+			registerCommands(dispatcher);
+		});
+
+		// サーバー起動時の処理
+		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+			MobSwitchState state = MobSwitchState.get(server);
+			if (state.isActive()) {
+				// 前回有効だった場合は、UUIDリストをチェックして存在しないモブがあれば再スポーン
+				checkAndRespawnDummyMobs(server, state);
+			}
+		});
+
+		// サーバー終了時の処理
+		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+			// 状態の保存は自動的に行われるため、特に何もしない
+		});
+
+		LOGGER.info("SimpleMobSwitch initialized successfully!");
+	}
+
+	private void checkAndRespawnDummyMobs(MinecraftServer server, MobSwitchState state) {
+		if (!state.isActive())
+			return;
+
+		ServerWorld overworld = server.getOverworld();
+		boolean needsRespawn = false;
+
+		// 既存のダミーモブをチェック
+		for (UUID uuid : state.getDummyMobUUIDs()) {
+			Entity entity = overworld.getEntity(uuid);
+			if (entity == null || !entity.isAlive()) {
+				needsRespawn = true;
+				break;
+			}
+		}
+
+		if (needsRespawn) {
+			LOGGER.info("Detected missing dummy mobs, respawning them...");
+			// 一度すべて削除してから再スポーン
+			deactivateMobSwitch(server);
+			activateMobSwitch(server.getCommandSource(), server);
+		}
+	}
+
+	private void registerCommands(CommandDispatcher<ServerCommandSource> dispatcher) {
+		dispatcher.register(
+				CommandManager.literal("mobswitch")
+						.requires(source -> source.hasPermissionLevel(2)) // OP権限必要
+						.then(CommandManager.literal("on")
+								.executes(this::executeMobSwitchOn))
+						.then(CommandManager.literal("off")
+								.executes(this::executeMobSwitchOff)));
+	}
+
+	private int executeMobSwitchOn(CommandContext<ServerCommandSource> context) {
+		ServerCommandSource source = context.getSource();
+		MinecraftServer server = source.getServer();
+		return activateMobSwitch(source, server);
+	}
+
+	private int activateMobSwitch(ServerCommandSource source, MinecraftServer server) {
+		MobSwitchState state = MobSwitchState.get(server);
+
+		if (state.isActive()) {
+			sendFeedback(source, Text.literal("モブスイッチは既に有効になっています。"), true);
+			return Command.SINGLE_SUCCESS;
+		}
+
+		// スポーンチャンクにダミーモブをスポーン
+		ServerWorld overworld = server.getOverworld();
+		BlockPos spawnPos = new BlockPos(0, DUMMY_MOB_Y_LEVEL, 0); // スポーンチャンク付近
+
+		int successCount = 0;
+		for (int i = 0; i < DUMMY_MOB_COUNT; i++) {
+			// 正しいパラメータでcreateメソッドを呼び出す
+			Consumer<ZombieEntity> callback = null; // コールバック不要の場合はnull
+			ZombieEntity zombie = EntityType.ZOMBIE.create(
+					overworld,
+					callback,
+					spawnPos,
+					SpawnReason.COMMAND,
+					false,
+					false);
+			if (zombie != null) {
+				zombie.refreshPositionAndAngles(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ(), 0, 0);
+				zombie.setCustomName(Text.literal(DUMMY_MOB_NAME));
+				zombie.setCustomNameVisible(false);
+				zombie.setAiDisabled(true);
+				zombie.setSilent(true);
+				zombie.setInvulnerable(true);
+				zombie.setNoGravity(true);
+				zombie.setPersistent();
+				zombie.setInvisible(true);
+
+				if (overworld.spawnEntity(zombie)) {
+					state.addDummyMob(zombie.getUuid());
+					successCount++;
+				}
+			}
+		}
+
+		if (successCount > 0) {
+			state.setActive(true);
+			sendFeedback(source, Text.literal(String.format("モブスイッチを有効化しました。%d体のダミーモブを召喚しました。", successCount)), true);
+			LOGGER.info("Mob switch activated, spawned {} dummy mobs", successCount);
+		} else {
+			sendFeedback(source, Text.literal("モブスイッチの有効化に失敗しました。"), true);
+			LOGGER.error("Failed to activate mob switch, no dummy mobs were spawned");
+		}
+
+		return Command.SINGLE_SUCCESS;
+	}
+
+	private int executeMobSwitchOff(CommandContext<ServerCommandSource> context) {
+		ServerCommandSource source = context.getSource();
+		return deactivateMobSwitch(source.getServer());
+	}
+
+	private int deactivateMobSwitch(MinecraftServer server) {
+		MobSwitchState state = MobSwitchState.get(server);
+
+		if (!state.isActive()) {
+			if (server.getCommandSource() instanceof ServerCommandSource) {
+				sendFeedback(server.getCommandSource(), Text.literal("モブスイッチは既に無効になっています。"), true);
+			}
+			return Command.SINGLE_SUCCESS;
+		}
+
+		int removedCount = 0;
+		for (ServerWorld world : server.getWorlds()) {
+			for (UUID uuid : state.getDummyMobUUIDs()) {
+				Entity entity = world.getEntity(uuid);
+				if (entity != null && entity.isAlive() &&
+						entity.getType() == EntityType.ZOMBIE &&
+						entity.getCustomName() != null &&
+						DUMMY_MOB_NAME.equals(entity.getCustomName().getString())) {
+
+					entity.remove(Entity.RemovalReason.DISCARDED);
+					removedCount++;
+				}
+			}
+		}
+
+		state.clearDummyMobs();
+		state.setActive(false);
+
+		if (server.getCommandSource() instanceof ServerCommandSource) {
+			sendFeedback(server.getCommandSource(),
+					Text.literal(String.format("モブスイッチを無効化しました。%d体のダミーモブを削除しました。", removedCount)), true);
+		}
+
+		LOGGER.info("Mob switch deactivated, removed {} dummy mobs", removedCount);
+		return Command.SINGLE_SUCCESS;
+	}
+
+	// MutableTextをSupplier<Text>に変換
+	private void sendFeedback(ServerCommandSource source, Text text, boolean broadcastToOps) {
+		source.sendFeedback(() -> text, broadcastToOps);
+	}
+}
