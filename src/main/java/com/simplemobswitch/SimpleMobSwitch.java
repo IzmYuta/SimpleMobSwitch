@@ -8,7 +8,7 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
-import net.minecraft.entity.mob.ZombieEntity;
+import net.minecraft.entity.mob.ShulkerEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
@@ -119,27 +119,26 @@ public class SimpleMobSwitch implements ModInitializer {
 		int successCount = 0;
 		for (int i = 0; i < DUMMY_MOB_COUNT; i++) {
 			// 正しいパラメータでcreateメソッドを呼び出す
-			Consumer<ZombieEntity> callback = null; // コールバック不要の場合はnull
-			ZombieEntity zombie = EntityType.ZOMBIE.create(
+			Consumer<ShulkerEntity> callback = null; // コールバック不要の場合はnull
+			ShulkerEntity shulker = EntityType.SHULKER.create(
 					overworld,
 					callback,
 					spawnPos,
 					SpawnReason.COMMAND,
 					false,
 					false);
-			if (zombie != null) {
-				zombie.refreshPositionAndAngles(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ(), 0, 0);
-				zombie.setCustomName(Text.literal(DUMMY_MOB_NAME));
-				zombie.setCustomNameVisible(false);
-				zombie.setAiDisabled(true);
-				zombie.setSilent(true);
-				zombie.setInvulnerable(true);
-				zombie.setNoGravity(true);
-				zombie.setPersistent();
-				zombie.setInvisible(true);
+			if (shulker != null) {
+				shulker.refreshPositionAndAngles(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ(), 0, 0);
+				shulker.setCustomName(Text.literal(DUMMY_MOB_NAME));
+				shulker.setCustomNameVisible(false);
+				shulker.setAiDisabled(true);
+				shulker.setSilent(true);
+				shulker.setInvulnerable(true);
+				shulker.setNoGravity(true);
+				shulker.setInvisible(true);
 
-				if (overworld.spawnEntity(zombie)) {
-					state.addDummyMob(zombie.getUuid());
+				if (overworld.spawnEntity(shulker)) {
+					state.addDummyMob(shulker.getUuid());
 					successCount++;
 				}
 			}
@@ -177,7 +176,7 @@ public class SimpleMobSwitch implements ModInitializer {
 			for (UUID uuid : state.getDummyMobUUIDs()) {
 				Entity entity = world.getEntity(uuid);
 				if (entity != null && entity.isAlive() &&
-						entity.getType() == EntityType.ZOMBIE &&
+						entity.getType() == EntityType.SHULKER &&
 						entity.getCustomName() != null &&
 						DUMMY_MOB_NAME.equals(entity.getCustomName().getString())) {
 
