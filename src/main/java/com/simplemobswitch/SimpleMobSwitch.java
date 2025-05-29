@@ -32,7 +32,7 @@ public class SimpleMobSwitch implements ModInitializer {
 
 	private static final String DUMMY_MOB_NAME = "MobSwitchDummy";
 	private static final int DUMMY_MOB_COUNT = 70; // モブ制限数
-	private static final int DUMMY_MOB_Y_LEVEL = -200; // 配置する高さ
+	private static final int DUMMY_MOB_Y_LEVEL = 1000; // より高い位置に変更
 
 	@Override
 	public void onInitialize() {
@@ -173,8 +173,7 @@ public class SimpleMobSwitch implements ModInitializer {
 
 		int successCount = 0;
 		for (int i = 0; i < DUMMY_MOB_COUNT; i++) {
-			// 正しいパラメータでcreateメソッドを呼び出す
-			Consumer<ShulkerEntity> callback = null; // コールバック不要の場合はnull
+			Consumer<ShulkerEntity> callback = null;
 			ShulkerEntity shulker = EntityType.SHULKER.create(
 					overworld,
 					callback,
