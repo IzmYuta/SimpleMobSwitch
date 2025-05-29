@@ -32,7 +32,7 @@ public class SimpleMobSwitch implements ModInitializer {
 
 	private static final String DUMMY_MOB_NAME = "MobSwitchDummy";
 	private static final int DUMMY_MOB_COUNT = 70; // モブ制限数
-	private static final int DUMMY_MOB_Y_LEVEL = 500; // 配置する高さ
+	private static final int DUMMY_MOB_Y_LEVEL = -200; // 配置する高さ
 
 	@Override
 	public void onInitialize() {
