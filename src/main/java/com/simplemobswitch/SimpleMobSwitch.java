@@ -118,9 +118,9 @@ public class SimpleMobSwitch implements ModInitializer {
 		BlockPos worldSpawn = overworld.getSpawnPos();
 
 		// スポーンチャンクの周辺（7x7の外側リング）に配置するのが最も効率的
-		// 中心から12チャンク離れた位置（スポーンチャンクの外側リング）
-		int offsetX = 12 * 16; // 12チャンク × 16ブロック
-		int offsetZ = 12 * 16;
+		// 中心から3チャンク離れた位置（スポーンチャンクの外側リング）
+		int offsetX = 3 * 16; // 3チャンク × 16ブロック
+		int offsetZ = 3 * 16;
 
 		// スポーンポイントから少しずらした位置にモブを配置（AI処理を減らすため）
 		BlockPos spawnPos = new BlockPos(worldSpawn.getX() + offsetX, DUMMY_MOB_Y_LEVEL, worldSpawn.getZ() + offsetZ);
