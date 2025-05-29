@@ -51,41 +51,87 @@ public class SimpleMobSwitch implements ModInitializer {
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			MobSwitchState state = MobSwitchState.get(server);
 			if (state.isActive()) {
-				// 前回有効だった場合は、UUIDリストをチェックして存在しないモブがあれば再スポーン
-				checkAndRespawnDummyMobs(server, state);
+				// 前回有効だった場合は、保存されたUUIDで再スポーン
+				respawnDummyMobsWithSavedUUIDs(server, state);
 			}
 		});
 
 		// サーバー終了時の処理
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-			// 状態の保存は自動的に行われるため、特に何もしない
+			MobSwitchState state = MobSwitchState.get(server);
+			if (state.isActive()) {
+				// ダミーモブを削除（UUIDは保持）
+				removeDummyMobsOnShutdown(server, state);
+			}
 		});
 
 		LOGGER.info("SimpleMobSwitch initialized successfully!");
 	}
 
-	private void checkAndRespawnDummyMobs(MinecraftServer server, MobSwitchState state) {
+	private void respawnDummyMobsWithSavedUUIDs(MinecraftServer server, MobSwitchState state) {
 		if (!state.isActive())
 			return;
 
-		ServerWorld overworld = server.getOverworld();
-		boolean needsRespawn = false;
+		LOGGER.info("Respawning dummy mobs with saved UUIDs...");
 
-		// 既存のダミーモブをチェック
-		for (UUID uuid : state.getDummyMobUUIDs()) {
-			Entity entity = overworld.getEntity(uuid);
-			if (entity == null || !entity.isAlive()) {
-				needsRespawn = true;
-				break;
+		ServerWorld overworld = server.getOverworld();
+		BlockPos worldSpawn = overworld.getSpawnPos();
+
+		int offsetX = 3 * 16;
+		int offsetZ = 3 * 16;
+		BlockPos spawnPos = new BlockPos(worldSpawn.getX() + offsetX, DUMMY_MOB_Y_LEVEL, worldSpawn.getZ() + offsetZ);
+
+		int successCount = 0;
+		for (UUID savedUUID : state.getDummyMobUUIDs()) {
+			Consumer<ShulkerEntity> callback = null;
+			ShulkerEntity shulker = EntityType.SHULKER.create(
+					overworld,
+					callback,
+					spawnPos,
+					SpawnReason.COMMAND,
+					false,
+					false);
+
+			if (shulker != null) {
+				// 保存されたUUIDを設定
+				shulker.setUuid(savedUUID);
+				shulker.refreshPositionAndAngles(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ(), 0, 0);
+				shulker.setCustomName(Text.literal(DUMMY_MOB_NAME));
+				shulker.setCustomNameVisible(false);
+				shulker.setAiDisabled(true);
+				shulker.setSilent(true);
+				shulker.setInvulnerable(true);
+				shulker.setNoGravity(true);
+				shulker.setInvisible(true);
+
+				if (overworld.spawnEntity(shulker)) {
+					successCount++;
+				}
 			}
 		}
 
-		if (needsRespawn) {
-			LOGGER.info("Detected missing dummy mobs, respawning them...");
-			// 一度すべて削除してから再スポーン
-			deactivateMobSwitch(server);
-			activateMobSwitch(server.getCommandSource(), server);
+		LOGGER.info("Respawned {} dummy mobs with saved UUIDs", successCount);
+	}
+
+	private void removeDummyMobsOnShutdown(MinecraftServer server, MobSwitchState state) {
+		LOGGER.info("Removing dummy mobs on server shutdown...");
+
+		int removedCount = 0;
+		for (ServerWorld world : server.getWorlds()) {
+			for (UUID uuid : state.getDummyMobUUIDs()) {
+				Entity entity = world.getEntity(uuid);
+				if (entity != null && entity.isAlive() &&
+						entity.getType() == EntityType.SHULKER &&
+						entity.getCustomName() != null &&
+						DUMMY_MOB_NAME.equals(entity.getCustomName().getString())) {
+
+					entity.remove(Entity.RemovalReason.DISCARDED);
+					removedCount++;
+				}
+			}
 		}
+
+		LOGGER.info("Removed {} dummy mobs on shutdown (UUIDs preserved)", removedCount);
 	}
 
 	private void registerCommands(CommandDispatcher<ServerCommandSource> dispatcher) {
@@ -195,6 +241,7 @@ public class SimpleMobSwitch implements ModInitializer {
 			}
 		}
 
+		// UUIDリストもクリア（完全に無効化）
 		state.clearDummyMobs();
 		state.setActive(false);
 
