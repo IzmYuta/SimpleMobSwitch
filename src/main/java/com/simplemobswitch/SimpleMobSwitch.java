@@ -6,6 +6,7 @@ import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.mob.ShulkerEntity;
@@ -31,7 +32,7 @@ public class SimpleMobSwitch implements ModInitializer {
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	private static final String DUMMY_MOB_NAME = "MobSwitchDummy";
-	private static final int DUMMY_MOB_COUNT = 70; // モブ制限数
+	private static final int BASE_DUMMY_MOB_COUNT = 70; // 1人あたりの基本モブ制限数
 	private static final int DUMMY_MOB_Y_LEVEL = 1000; // より高い位置に変更
 
 	@Override
@@ -45,6 +46,23 @@ public class SimpleMobSwitch implements ModInitializer {
 		// コマンド登録（非推奨APIを新しいものに置き換え）
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
 			registerCommands(dispatcher);
+		});
+
+		// プレイヤー参加時の処理
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			MobSwitchState state = MobSwitchState.get(server);
+			if (state.isActive()) {
+				adjustDummyMobCount(server, state);
+			}
+		});
+
+		// プレイヤー退出時の処理
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			MobSwitchState state = MobSwitchState.get(server);
+			if (state.isActive()) {
+				// 少し遅延させてプレイヤー数が更新されてから調整
+				server.execute(() -> adjustDummyMobCount(server, state));
+			}
 		});
 
 		// サーバー起動時の処理
@@ -66,6 +84,91 @@ public class SimpleMobSwitch implements ModInitializer {
 		});
 
 		LOGGER.info("SimpleMobSwitch initialized successfully!");
+	}
+
+	private int calculateRequiredMobCount(MinecraftServer server) {
+		int playerCount = server.getCurrentPlayerCount();
+		return playerCount * BASE_DUMMY_MOB_COUNT;
+	}
+
+	private void adjustDummyMobCount(MinecraftServer server, MobSwitchState state) {
+		int requiredCount = calculateRequiredMobCount(server);
+		int currentCount = state.getDummyMobUUIDs().size();
+
+		LOGGER.info("Adjusting dummy mob count: current={}, required={}, players={}",
+				currentCount, requiredCount, server.getCurrentPlayerCount());
+
+		if (requiredCount > currentCount) {
+			// モブを追加
+			spawnAdditionalDummyMobs(server, state, requiredCount - currentCount);
+		} else if (requiredCount < currentCount) {
+			// モブを削除
+			removeExcessDummyMobs(server, state, currentCount - requiredCount);
+		}
+	}
+
+	private void spawnAdditionalDummyMobs(MinecraftServer server, MobSwitchState state, int count) {
+		ServerWorld overworld = server.getOverworld();
+		BlockPos worldSpawn = overworld.getSpawnPos();
+
+		int offsetX = 3 * 16;
+		int offsetZ = 3 * 16;
+		BlockPos spawnPos = new BlockPos(worldSpawn.getX() + offsetX, DUMMY_MOB_Y_LEVEL, worldSpawn.getZ() + offsetZ);
+
+		int successCount = 0;
+		for (int i = 0; i < count; i++) {
+			Consumer<ShulkerEntity> callback = null;
+			ShulkerEntity shulker = EntityType.SHULKER.create(
+					overworld,
+					callback,
+					spawnPos,
+					SpawnReason.COMMAND,
+					false,
+					false);
+
+			if (shulker != null) {
+				shulker.refreshPositionAndAngles(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ(), 0, 0);
+				shulker.setCustomName(Text.literal(DUMMY_MOB_NAME));
+				shulker.setCustomNameVisible(false);
+				shulker.setAiDisabled(true);
+				shulker.setSilent(true);
+				shulker.setInvulnerable(true);
+				shulker.setNoGravity(true);
+				shulker.setInvisible(true);
+
+				if (overworld.spawnEntity(shulker)) {
+					state.addDummyMob(shulker.getUuid());
+					successCount++;
+				}
+			}
+		}
+
+		LOGGER.info("Spawned {} additional dummy mobs", successCount);
+	}
+
+	private void removeExcessDummyMobs(MinecraftServer server, MobSwitchState state, int count) {
+		int removedCount = 0;
+		UUID[] uuidsToRemove = state.getDummyMobUUIDs().toArray(new UUID[0]);
+
+		for (int i = 0; i < Math.min(count, uuidsToRemove.length); i++) {
+			UUID uuid = uuidsToRemove[i];
+
+			for (ServerWorld world : server.getWorlds()) {
+				Entity entity = world.getEntity(uuid);
+				if (entity != null && entity.isAlive() &&
+						entity.getType() == EntityType.SHULKER &&
+						entity.getCustomName() != null &&
+						DUMMY_MOB_NAME.equals(entity.getCustomName().getString())) {
+
+					entity.remove(Entity.RemovalReason.DISCARDED);
+					state.removeDummyMob(uuid);
+					removedCount++;
+					break;
+				}
+			}
+		}
+
+		LOGGER.info("Removed {} excess dummy mobs", removedCount);
 	}
 
 	private void respawnDummyMobsWithSavedUUIDs(MinecraftServer server, MobSwitchState state) {
@@ -111,6 +214,9 @@ public class SimpleMobSwitch implements ModInitializer {
 		}
 
 		LOGGER.info("Respawned {} dummy mobs with saved UUIDs", successCount);
+
+		// サーバー起動後にプレイヤー数に応じて調整
+		adjustDummyMobCount(server, state);
 	}
 
 	private void removeDummyMobsOnShutdown(MinecraftServer server, MobSwitchState state) {
@@ -158,6 +264,9 @@ public class SimpleMobSwitch implements ModInitializer {
 			return Command.SINGLE_SUCCESS;
 		}
 
+		// プレイヤー数に応じたモブ数を計算
+		int requiredMobCount = calculateRequiredMobCount(server);
+
 		// スポーンチャンクにダミーモブをスポーン
 		ServerWorld overworld = server.getOverworld();
 		// ワールドのスポーンポイントを取得
@@ -172,7 +281,7 @@ public class SimpleMobSwitch implements ModInitializer {
 		BlockPos spawnPos = new BlockPos(worldSpawn.getX() + offsetX, DUMMY_MOB_Y_LEVEL, worldSpawn.getZ() + offsetZ);
 
 		int successCount = 0;
-		for (int i = 0; i < DUMMY_MOB_COUNT; i++) {
+		for (int i = 0; i < requiredMobCount; i++) {
 			Consumer<ShulkerEntity> callback = null;
 			ShulkerEntity shulker = EntityType.SHULKER.create(
 					overworld,
@@ -200,8 +309,10 @@ public class SimpleMobSwitch implements ModInitializer {
 
 		if (successCount > 0) {
 			state.setActive(true);
-			sendFeedback(source, Text.literal(String.format("モブスイッチを有効化しました。%d体のダミーモブを召喚しました。", successCount)), true);
-			LOGGER.info("Mob switch activated, spawned {} dummy mobs", successCount);
+			sendFeedback(source, Text.literal(String.format("モブスイッチを有効化しました。%d体のダミーモブを召喚しました。（プレイヤー数: %d人）",
+					successCount, server.getCurrentPlayerCount())), true);
+			LOGGER.info("Mob switch activated, spawned {} dummy mobs for {} players", successCount,
+					server.getCurrentPlayerCount());
 		} else {
 			sendFeedback(source, Text.literal("モブスイッチの有効化に失敗しました。"), true);
 			LOGGER.error("Failed to activate mob switch, no dummy mobs were spawned");

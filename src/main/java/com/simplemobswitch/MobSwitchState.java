@@ -72,6 +72,11 @@ public class MobSwitchState extends PersistentState {
         this.markDirty();
     }
 
+    public void removeDummyMob(UUID uuid) {
+        dummyMobUUIDs.remove(uuid);
+        markDirty();
+    }
+
     public NbtCompound toNbt() {
         NbtCompound nbt = new NbtCompound();
         nbt.putBoolean("isActive", isActive);
