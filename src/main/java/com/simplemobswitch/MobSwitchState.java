@@ -8,6 +8,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.PersistentState;
 
 import net.minecraft.world.PersistentStateType;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +19,20 @@ public class MobSwitchState extends PersistentState {
     private static final String IDENTIFIER = "mob_switch_state";
     private boolean isActive = false;
     private final List<UUID> dummyMobUUIDs = new ArrayList<>();
+
+    // コーデックの定義
+    public static final Codec<MobSwitchState> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            Codec.BOOL.fieldOf("isActive").forGetter(state -> state.isActive),
+            Codec.STRING.listOf().xmap(
+                    strings -> strings.stream().map(UUID::fromString).collect(java.util.stream.Collectors.toList()),
+                    uuids -> uuids.stream().map(UUID::toString).collect(java.util.stream.Collectors.toList()))
+                    .fieldOf("dummyMobs").forGetter(state -> state.dummyMobUUIDs))
+            .apply(instance, (isActive, dummyMobs) -> {
+                MobSwitchState state = new MobSwitchState();
+                state.isActive = isActive;
+                state.dummyMobUUIDs.addAll(dummyMobs);
+                return state;
+            }));
 
     public MobSwitchState() {
         super();
@@ -28,7 +44,7 @@ public class MobSwitchState extends PersistentState {
                         new PersistentStateType<>(
                                 IDENTIFIER,
                                 () -> new MobSwitchState(),
-                                null, // codec - 現在の実装では不要
+                                CODEC,
                                 null // DataFixTypes - 現在の実装では不要
                         ));
     }
